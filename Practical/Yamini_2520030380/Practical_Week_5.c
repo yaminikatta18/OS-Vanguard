@@ -1,17 +1,29 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+#define NUM_MESSAGES 10000
+#define MESSAGE_SIZE 64
+
+double get_elapsed_time(struct timespec start, struct timespec end)
+{
+    return (end.tv_sec - start.tv_sec) +
+           (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+}
+
+/* Producer-Consumer using Anonymous Pipe */
 void producer_consumer()
 {
     int pipefd[2];
     pid_t pid;
-    char buffer[100];
-    int data = 100;
+    char message[MESSAGE_SIZE];
+    char buffer[256];
+
+    long total_bytes = 0;
 
     if (pipe(pipefd) == -1)
     {
@@ -32,12 +44,24 @@ void producer_consumer()
         /* Child - Consumer */
         close(pipefd[1]);
 
-        read(pipefd[0], buffer, sizeof(buffer));
+        ssize_t bytes_read;
 
-        printf("Consumer (Child): Received data -> %s\n", buffer);
-        printf("Consumer PID: %d\n", getpid());
+        while ((bytes_read = read(pipefd[0], buffer,
+                                  sizeof(buffer))) > 0)
+        {
+            total_bytes += bytes_read;
+        }
 
         close(pipefd[0]);
+
+        printf("Consumer (Child): Received %ld bytes\n",
+               total_bytes);
+
+        printf("Consumer (Child): Received %ld messages\n",
+               total_bytes / MESSAGE_SIZE);
+
+        printf("Consumer PID: %d\n", getpid());
+
         exit(0);
     }
     else
@@ -45,37 +69,76 @@ void producer_consumer()
         /* Parent - Producer */
         close(pipefd[0]);
 
+        memset(message, 'A', MESSAGE_SIZE);
+        message[MESSAGE_SIZE - 1] = '\n';
+
+        struct timespec start, end;
+
         printf("Producer (Parent): Generating data...\n");
-
-        snprintf(buffer, sizeof(buffer),
-                 "Data value = %d", data);
-
-        clock_t start = clock();
-
-        write(pipefd[1], buffer, strlen(buffer) + 1);
-
-        clock_t end = clock();
-
-        double time_taken =
-            (double)(end - start) / CLOCKS_PER_SEC;
-
         printf("Producer PID: %d\n", getpid());
-        printf("Producer: Data sent through pipe.\n");
-        printf("Communication time: %.6f seconds\n",
-               time_taken);
+        printf("Number of messages: %d\n", NUM_MESSAGES);
+        printf("Message size: %d bytes\n", MESSAGE_SIZE);
+
+        clock_gettime(CLOCK_MONOTONIC, &start);
+
+        for (int i = 0; i < NUM_MESSAGES; i++)
+        {
+            ssize_t total_written = 0;
+
+            while (total_written < MESSAGE_SIZE)
+            {
+                ssize_t bytes_written =
+                    write(pipefd[1],
+                          message + total_written,
+                          MESSAGE_SIZE - total_written);
+
+                if (bytes_written <= 0)
+                {
+                    perror("write failed");
+                    close(pipefd[1]);
+                    wait(NULL);
+                    exit(1);
+                }
+
+                total_written += bytes_written;
+            }
+        }
 
         close(pipefd[1]);
 
         wait(NULL);
 
+        clock_gettime(CLOCK_MONOTONIC, &end);
+
+        double elapsed =
+            get_elapsed_time(start, end);
+
+        long total_data =
+            (long)NUM_MESSAGES * MESSAGE_SIZE;
+
+        double throughput =
+            (total_data / 1024.0) / elapsed;
+
+        printf("Producer: Data sent successfully.\n");
+        printf("Total data transferred: %ld bytes\n",
+               total_data);
+
+        printf("Communication time: %.6f seconds\n",
+               elapsed);
+
+        printf("Communication throughput: %.2f KB/s\n",
+               throughput);
+
         printf("Producer: Consumer process completed.\n");
     }
 }
 
+/* Equivalent of: ls -l | grep ".c" */
 void pipeline_demo()
 {
     int pipefd[2];
-    pid_t ls_pid, grep_pid;
+    pid_t ls_pid;
+    pid_t grep_pid;
 
     printf("\n--- ls -l | grep \".c\" Demonstration ---\n");
 
@@ -85,7 +148,7 @@ void pipeline_demo()
         exit(1);
     }
 
-    /* First child: ls -l */
+    /* First child executes ls -l */
     ls_pid = fork();
 
     if (ls_pid < 0)
@@ -107,7 +170,7 @@ void pipeline_demo()
         exit(1);
     }
 
-    /* Second child: grep ".c" */
+    /* Second child executes grep ".c" */
     grep_pid = fork();
 
     if (grep_pid < 0)
@@ -129,7 +192,7 @@ void pipeline_demo()
         exit(1);
     }
 
-    /* Parent */
+    /* Parent closes pipe and waits */
     close(pipefd[0]);
     close(pipefd[1]);
 
