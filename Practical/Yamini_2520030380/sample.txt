@@ -1,0 +1,4 @@
+This is my OS Practical Week 2.
+This file is used to demonstrate Linux file system calls.
+
+
