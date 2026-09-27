@@ -1,0 +1,4 @@
+This message was redirected to output.txt
+Standard input is redirected from input.txt
+Standard output is redirected to output.txt
+dup2() successfully demonstrated I/O redirection.
